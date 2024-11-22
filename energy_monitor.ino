@@ -10,6 +10,8 @@
 
 // follow this first: https://randomnerdtutorials.com/esp32-esp8266-plot-chart-web-server/
 
+
+// interrupts: https://gammon.com.au/interrupts
 /**
  * ----------------------------------------------------------------------------
  * Energy Monitor
@@ -27,6 +29,7 @@
 // WiFi and webserver stuff
 #include <ESP8266WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <ArduinoJson.h>
 
 // ----------------------------------------------------------------------------
 // Definition of macros
@@ -39,7 +42,7 @@
 // Definition of global constants
 // ----------------------------------------------------------------------------
 
-// Nothing yet...
+const int length = 200;
 
 // ----------------------------------------------------------------------------
 // Definition of the Led component
@@ -49,10 +52,11 @@ struct Led {
   // state variables
   uint8_t pin;
   bool    on;
+  int     brightness;
 
   // methods
   void update() {
-    digitalWrite(pin, on ? HIGH : LOW);
+    analogWrite(pin, on ? brightness : 255);
   }
 };
 
@@ -74,13 +78,20 @@ struct AnalogSensor {
 // Definition of global variables
 // ----------------------------------------------------------------------------
 
-Led onboard_led = { LED_BUILTIN, false };  // LED_BUILTIN is a variable arduino
+Led onboard_led = { LED_BUILTIN, false, 255 };  // LED_BUILTIN is a variable arduino
 
 AnalogSensor photo_resistor = { A0 };  // A0 is an arduino variable - ESP8266 Analog Pin ADC0 = A0
 
 AsyncWebServer server(HTTP_PORT);
 
 int sensorValue = 0;
+
+int count = 0;
+
+int values[length];
+long timestamps[length];
+
+time_t now;
 
 // ----------------------------------------------------------------------------
 // LittleFS initialization
@@ -131,10 +142,27 @@ void onSensorRequest(AsyncWebServerRequest *request) {
   request->send(200, "text/html", String(photo_resistor.read()));
 }
 
+void onDataRequest(AsyncWebServerRequest *request) {
+  // Allocate a temporary JsonDocument
+  JsonDocument doc;
+
+  // Create the data array
+  JsonArray dataValues = doc["data"].to<JsonArray>();
+  for (byte i = 0; i < length; i = i + 1) {
+    JsonArray measurement = dataValues.add<JsonArray>();
+    measurement.add(timestamps[(i + count) % length]);
+    measurement.add(values[(i + count) % length]);
+  };
+  String response;
+  serializeJson(doc, response);
+  request->send(200, "application/json", response);
+}
+
 void initWebServer() {
   server.on("/", onRootRequest);
   server.serveStatic("/", LittleFS, "/");
   server.on("/energy", onSensorRequest);
+  server.on("/data", onDataRequest);
   server.begin();
   Serial.println("HTTP Server Started");
 }
@@ -152,16 +180,44 @@ void setup() {
   initLittleFS();
   initWiFi();
   initWebServer();
+  
+  onboard_led.brightness = 200;
+  onboard_led.on = false;
+  onboard_led.update();
 }
 
 void loop() {
   // read the analog in value
   sensorValue = photo_resistor.read();
- 
+  time(&now);
+
+  // flash the onboard led
+  // onboard_led.on = millis() % 2000 < 200;
+  // onboard_led.update();
+
   // print the readings in the Serial Monitor
-  Serial.print("sensor = ");
-  Serial.println(sensorValue);
+  // Serial.print("sensor = ");
+  // Serial.println(sensorValue);
   
-  delay(1000);
+  values[count % length] = sensorValue;
+  timestamps[count % length] = millis();
+  count +=  1;
+
+  // if (!(count % 10)) {
+  //   Serial.print("count = ");
+  //   Serial.println(count);
+  //   for (byte i = 0; i < length; i = i + 1) {
+  //     Serial.print(values[i]);
+  //     Serial.print(", ");
+  //   };
+  //   Serial.println();
+  //   for (byte i = 0; i < length; i = i + 1) {
+  //     Serial.print(timestamps[i]);
+  //     Serial.print(", ");
+  //   };
+  //   Serial.println();
+  // }
+
+  delay(25);
 }
 

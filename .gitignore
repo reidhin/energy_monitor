@@ -1,5 +1,7 @@
-arduino_secrets
+arduino_secrets.h
 
 # documents
 *.odp
+*.odp#
 *.odt
+*.odt#
