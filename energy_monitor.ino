@@ -44,6 +44,8 @@
 
 const int length = 200;
 
+const int delta_time = 25;
+
 // ----------------------------------------------------------------------------
 // Definition of the Led component
 // ----------------------------------------------------------------------------
@@ -75,6 +77,124 @@ struct AnalogSensor {
 };
 
 // ----------------------------------------------------------------------------
+// Definition of the sensor data
+// ----------------------------------------------------------------------------
+
+struct SensorData {
+  // state variables - data
+  int count_sample;
+  int data_values[length];
+  long data_timestamps[length];
+
+  // state variables - peaks
+  int count_peaks;
+  int peak_values[length];
+  long peak_timestamps[length];
+  int min_value;
+  int max_value;
+  long peak_start;
+  long peak_end;
+  long peak_max;
+  
+  // state variables - peak detection
+  int threshold;
+  int lag;
+  bool peak;
+  double avg;
+
+  // initialization
+  void initialize(int init_threshold, int init_lag) {
+    // initialize variables
+    count_sample = 0;
+    count_peaks = 0;
+    threshold = init_threshold;
+    lag = init_lag;
+    avg = 0.0;
+    peak = false;
+
+    // initialize arrays
+    for (int i = 0; i < length; ++i) {
+      data_values[i] = 0;
+      data_timestamps[i] = 0;
+      peak_values[i] = 0;
+      peak_timestamps[i] = 0;
+    };
+
+  }
+
+  // update the data
+  void update(int currentValue, long current_millis) {
+    // define indices for convenience
+    int current_index = count_sample % length;
+    int next_index = (count_sample + 1) % length;
+    
+    // set data values
+    data_values[current_index] = currentValue;
+    data_timestamps[current_index] = current_millis;
+    count_sample += 1;
+    
+    // compare
+    if ( (currentValue - threshold) > avg && !peak ) {
+      // start of peak
+      peak = true;
+      min_value = avg;
+      max_value = currentValue;
+      peak_start = current_millis;
+      peak_max = current_millis;
+    }
+
+    if (peak && currentValue > max_value) {
+      // during peak
+      max_value = currentValue;
+      peak_max = current_millis;
+    }
+
+    if ( (currentValue - threshold) < avg && peak ) {
+      // end of peak
+      peak = false;
+      peak_end = current_millis;
+      // check validity of peak
+      if ( (max_value - min_value > 2*threshold) && (peak_end - peak_start > 50) && (peak_end - peak_start < 1000) ) {
+        // peak amplitude should be 2 times the threshold
+        // peak duration should be between 50 and 1000 milliseconds
+        peak_timestamps[count_peaks % length] = peak_max;
+        peak_values[count_peaks % length] = max_value;
+        count_peaks += 1;
+
+        if (count_peaks >= 16383) count_peaks = count_peaks % length;  // reset if the count becomes too large
+      }
+    }
+
+    // update average
+    avg = (currentValue + (lag - 1) * avg) / lag;
+
+    // reset if the count becomes too large
+    if (count_sample >= 16383) // 2^14
+      count_sample = current_index;
+  }
+
+
+  // method to return json data
+  JsonDocument get_json() {
+    // Allocate a temporary JsonDocument
+    JsonDocument doc;
+
+    // Create the data array
+    JsonArray dataValues = doc["data"].to<JsonArray>();  // data samples
+    JsonArray peakValues = doc["peaks"].to<JsonArray>(); // peak data
+    for (byte i = 0; i < length; i = i + 1) {
+      JsonArray measurement = dataValues.add<JsonArray>();
+      measurement.add(data_timestamps[(i + count_sample) % length]);
+      measurement.add(data_values[(i + count_sample) % length]);
+      JsonArray peaks = peakValues.add<JsonArray>();
+      peaks.add(peak_timestamps[(i + count_peaks) % length]);
+      peaks.add(peak_values[(i + count_peaks) % length]);
+    };
+    return doc; 
+  }
+};
+
+// ----------------------------------------------------------------------------
 // Definition of global variables
 // ----------------------------------------------------------------------------
 
@@ -86,10 +206,10 @@ AsyncWebServer server(HTTP_PORT);
 
 int sensorValue = 0;
 
-int count = 0;
+int currentMillis = 0;
+int nextMillis = 0;
 
-int values[length];
-long timestamps[length];
+SensorData photo_resistor_data;
 
 time_t now;
 
@@ -143,18 +263,8 @@ void onSensorRequest(AsyncWebServerRequest *request) {
 }
 
 void onDataRequest(AsyncWebServerRequest *request) {
-  // Allocate a temporary JsonDocument
-  JsonDocument doc;
-
-  // Create the data array
-  JsonArray dataValues = doc["data"].to<JsonArray>();
-  for (byte i = 0; i < length; i = i + 1) {
-    JsonArray measurement = dataValues.add<JsonArray>();
-    measurement.add(timestamps[(i + count) % length]);
-    measurement.add(values[(i + count) % length]);
-  };
   String response;
-  serializeJson(doc, response);
+  serializeJson(photo_resistor_data.get_json(), response);
   request->send(200, "application/json", response);
 }
 
@@ -174,50 +284,76 @@ void initWebServer() {
 void setup() {
   // put your setup code here, to run once:
   pinMode(onboard_led.pin, OUTPUT);
-
+  
   Serial.begin(115200); delay(500);
 
   initLittleFS();
   initWiFi();
   initWebServer();
   
-  onboard_led.brightness = 200;
+  onboard_led.brightness = 0;
   onboard_led.on = false;
   onboard_led.update();
+
+  photo_resistor_data.initialize(20, 10);
 }
 
 void loop() {
-  // read the analog in value
-  sensorValue = photo_resistor.read();
-  time(&now);
-
   // flash the onboard led
-  // onboard_led.on = millis() % 2000 < 200;
-  // onboard_led.update();
+  onboard_led.on = millis() % 1000 < 100;
+  onboard_led.update();
 
-  // print the readings in the Serial Monitor
-  // Serial.print("sensor = ");
-  // Serial.println(sensorValue);
-  
-  values[count % length] = sensorValue;
-  timestamps[count % length] = millis();
-  count +=  1;
+  // vind de piek gebaseerd op pulsesensorplayground
 
-  // if (!(count % 10)) {
-  //   Serial.print("count = ");
-  //   Serial.println(count);
-  //   for (byte i = 0; i < length; i = i + 1) {
-  //     Serial.print(values[i]);
-  //     Serial.print(", ");
-  //   };
-  //   Serial.println();
-  //   for (byte i = 0; i < length; i = i + 1) {
-  //     Serial.print(timestamps[i]);
-  //     Serial.print(", ");
-  //   };
-  //   Serial.println();
-  // }
+  // vergeet de phototransistor
 
-  delay(25);
+  // probeer elke 25 ms te meten (minstens)
+
+  currentMillis = millis();
+  if (currentMillis > nextMillis) {
+    // define next time to sample
+    nextMillis = currentMillis + delta_time;
+
+    // read the analog in value
+    sensorValue = photo_resistor.read();
+    time(&now);
+
+    // // find highest point in signal
+    // if (sensorValue > threshold && sensorValue > peak_value) {
+    //   peak_value = sensorValue;
+    // }
+
+    // // find lowest point in signal
+    // if (sensorValue < threshold && sensorValue < trough_value) {
+    //   trough_value = sensorValue;
+    // }
+
+    // // peak is found
+    // if (sensorValue > threshold && !is_pulse) {
+    //   is_pulse = true;
+    // }
+
+    // // end of peak
+    // if (sensorValue < threshold && is_pulse) {
+    //   is_pulse = false;
+    //   threshold = trough_value + (peak_value - trough_value) / 2;
+    //   peak_value = threshold;
+    //   trough_value = threshold;
+    // }
+
+    photo_resistor_data.update(sensorValue, currentMillis);
+
+    // Serial.print(sensorValue);
+    // Serial.print(", ");
+    // Serial.print(photo_resistor_data.avg);
+    // Serial.print(", ");
+    // Serial.print(photo_resistor_data.min_value);
+    // Serial.print(", ");
+    // Serial.print(photo_resistor_data.max_value);
+    // Serial.print(", ");
+    // Serial.println(photo_resistor_data.peak ? 100 : 0);
+
+  };
+
 }
 

@@ -13,92 +13,101 @@
 window.addEventListener('load', onLoad);
 
 function onLoad(event) {
-  // initChart();
-  initChart2();
+  initChart();
 }
 
 // ----------------------------------------------------------------------------
 // Define Chart
 // ----------------------------------------------------------------------------
 
+
 function initChart() {
-    var chartT = new Highcharts.Chart({
+
+    // define raw-data chart
+    var chart_raw = new Highcharts.Chart({
+      chart:{ renderTo : 'chart-raw-data' },
+      title: { text: 'Ruwe signaal' },
+      series: [{
+        name: 'Ruwe signaal',
+        type: 'line',
+        color: '#059e8a',
+        data: []
+      }, {
+        name: 'Peaks',
+        type: 'scatter',
+        color: '#9e058a',
+        data: []
+      }],
+      xAxis: { type: 'datetime',
+        dateTimeLabelFormats: { second: '%H:%M:%S' }
+      },
+      yAxis: {
+        title: { text: 'Lichtintensiteit [a.u.]' }
+      },
+      credits: { enabled: false }
+    });
+    
+    // define inter-peak-inteval chart
+    var chart_energy = new Highcharts.Chart({
       chart:{ renderTo : 'chart-energy' },
       title: { text: 'Energie verbruik' },
       series: [{
-        showInLegend: false,
-        data: []
-      }],
-      plotOptions: {
-        line: { animation: false,
-          dataLabels: { enabled: true }
+        name: 'IPI',
+        type: 'line',
+        color: '#059e8a',
+        marker: {
+            enabled: true
         },
-        series: { color: '#059e8a' }
-      },
-      xAxis: { type: 'datetime',
-        dateTimeLabelFormats: { second: '%H:%M:%S' }
-      },
-      yAxis: {
-        title: { text: 'Energie (Wh)' }
-      },
-      credits: { enabled: false }
-    });
-    
-    setInterval(function ( ) {
-      var xhttp = new XMLHttpRequest();
-      xhttp.onreadystatechange = function() {
-        if (this.readyState == 4 && this.status == 200) {
-          var x = (new Date()).getTime(),
-              y = parseFloat(this.responseText);
-          //console.log(this.responseText);
-          if(chartT.series[0].data.length > 40) {
-            chartT.series[0].addPoint([x, y], true, true, true);
-          } else {
-            chartT.series[0].addPoint([x, y], true, false, true);
-          }
-        }
-      };
-      xhttp.open("GET", "/energy", true);
-      xhttp.send();
-    }, 30000 ) ;    
-}
-
-
-function initChart2() {
-    var chart = new Highcharts.Chart({
-      chart:{ renderTo : 'chart-energy2' },
-      title: { text: 'Energie verbruik 2' },
-      series: [{
-        showInLegend: false,
         data: []
       }],
-      plotOptions: {
-        line: { animation: false},
-        series: { color: '#059e8a' }
-      },
       xAxis: { type: 'datetime',
         dateTimeLabelFormats: { second: '%H:%M:%S' }
       },
       yAxis: {
-        title: { text: 'Energie (Wh)' }
+        title: { text: 'IPI' }
       },
       credits: { enabled: false }
     });
+
     
     setInterval(function ( ) {
       var xhttp = new XMLHttpRequest();
       xhttp.onreadystatechange = function() {
         if (this.readyState == 4 && this.status == 200) {
+          
+          // add raw signal data
           const data = this.response["data"];
-          console.log(this.response);
           for (let i = 0; i < data.length; i++) {
-            if(chart.series[0].data.length > 1200) {
-                chart.series[0].addPoint(data[i], true, true, true);
+            if(chart_raw.series[0].data.length > 1200) {
+                chart_raw.series[0].addPoint(data[i], false, true, true);
             } else {
-                chart.series[0].addPoint(data[i], true, false, true);
+                chart_raw.series[0].addPoint(data[i], false, false, true);
             }
           };
-          chart.redraw();
+          
+          // add detected peaks to raw signal data
+          const peaks = this.response["peaks"];
+          // remove existing data
+          chart_raw.series[1].setData([]);
+          // only add peaks to visible raw signal
+          for (let i = 0; i < peaks.length; i++) {
+            if(peaks[i][0] >= chart_raw.xAxis[0].getExtremes().dataMin) {
+                chart_raw.series[1].addPoint(peaks[i], false);
+            }
+          };
+          
+          // redraw the raw-data chart
+          chart_raw.redraw();
+          
+          // add inter-peak-intervals
+          var ipi = [];
+          for (let i = 1; i < peaks.length; i++) {
+            if ( peaks[i][0] > peaks[i-1][0] ) {
+                // only add data if there is a difference
+                ipi.push([ peaks[i][0], peaks[i][0] - peaks[i-1][0] ]);
+            }
+          }
+          chart_energy.series[0].setData(ipi);
         }
       };
       xhttp.open("GET", "/data", true);
@@ -106,7 +115,5 @@ function initChart2() {
       xhttp.send();
     }, 5000 ) ;    
 }
-
-
 
 
