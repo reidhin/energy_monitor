@@ -1,17 +1,3 @@
-// https://github.com/mruettgers/SMLReader
-// https://www.bitsandparts.nl/Lichtsensor-Fototransistor-BPW40-p115130
-// BPW40
-// flat side = collector
-// pijl gaat naar emitter
-
-// https://subscription.packtpub.com/book/iot-and-hardware/9781785888564/3/ch03lvl1sec27/reading-and-counting-pulses-with-arduino
-// https://roboticsbackend.com/arduino-pulsein-with-interrupts/
-// https://forum.arduino.cc/t/counting-pulse-of-energy-meter/550830/8
-
-// follow this first: https://randomnerdtutorials.com/esp32-esp8266-plot-chart-web-server/
-
-
-// interrupts: https://gammon.com.au/interrupts
 /**
  * ----------------------------------------------------------------------------
  * Energy Monitor
@@ -161,7 +147,8 @@ struct SensorData {
         peak_values[count_peaks % length] = max_value;
         count_peaks += 1;
 
-        if (count_peaks >= 16383) count_peaks = count_peaks % length;  // reset if the count becomes too large
+        // reset if the count becomes too large
+        if (count_peaks >= 16383) count_peaks = count_peaks % length;  
       }
     }
 
@@ -170,7 +157,7 @@ struct SensorData {
 
     // reset if the count becomes too large
     if (count_sample >= 16383) // 2^14
-      count_sample = current_index;
+      count_sample = count_sample % length;
   }
 
 
@@ -194,6 +181,7 @@ struct SensorData {
   }
 };
 
+
 // ----------------------------------------------------------------------------
 // Definition of global variables
 // ----------------------------------------------------------------------------
@@ -204,14 +192,19 @@ AnalogSensor photo_resistor = { A0 };  // A0 is an arduino variable - ESP8266 An
 
 AsyncWebServer server(HTTP_PORT);
 
+AsyncEventSource events("/events");
+
 int sensorValue = 0;
 
 int currentMillis = 0;
 int nextMillis = 0;
 
+int previous_count_peaks = 0;
+
 SensorData photo_resistor_data;
 
 time_t now;
+
 
 // ----------------------------------------------------------------------------
 // LittleFS initialization
@@ -226,6 +219,7 @@ void initLittleFS() {
     }
   }
 }
+
 
 // ----------------------------------------------------------------------------
 // Connecting to the WiFi network
@@ -245,6 +239,7 @@ void initWiFi() {
   WiFi.setAutoReconnect(true);
   WiFi.persistent(true);
 }
+
 
 // ----------------------------------------------------------------------------
 // Web server initialization
@@ -273,9 +268,21 @@ void initWebServer() {
   server.serveStatic("/", LittleFS, "/");
   server.on("/energy", onSensorRequest);
   server.on("/data", onDataRequest);
+  
+  // Handle Web Server Events
+  events.onConnect([](AsyncEventSourceClient *client){
+    if(client->lastId()){
+      Serial.printf("Client reconnected! Last message ID that it got is: %u\n", client->lastId());
+    }
+  });
+  
+  server.addHandler(&events);
+  
   server.begin();
   Serial.println("HTTP Server Started");
 }
+
+
 
 // ----------------------------------------------------------------------------
 // Initialization
@@ -298,17 +305,13 @@ void setup() {
   photo_resistor_data.initialize(20, 10);
 }
 
+
 void loop() {
   // flash the onboard led
-  onboard_led.on = millis() % 1000 < 100;
+  onboard_led.on = millis() % 2000 < 100;
   onboard_led.update();
 
-  // vind de piek gebaseerd op pulsesensorplayground
-
-  // vergeet de phototransistor
-
   // probeer elke 25 ms te meten (minstens)
-
   currentMillis = millis();
   if (currentMillis > nextMillis) {
     // define next time to sample
@@ -318,30 +321,25 @@ void loop() {
     sensorValue = photo_resistor.read();
     time(&now);
 
-    // // find highest point in signal
-    // if (sensorValue > threshold && sensorValue > peak_value) {
-    //   peak_value = sensorValue;
-    // }
-
-    // // find lowest point in signal
-    // if (sensorValue < threshold && sensorValue < trough_value) {
-    //   trough_value = sensorValue;
-    // }
-
-    // // peak is found
-    // if (sensorValue > threshold && !is_pulse) {
-    //   is_pulse = true;
-    // }
-
-    // // end of peak
-    // if (sensorValue < threshold && is_pulse) {
-    //   is_pulse = false;
-    //   threshold = trough_value + (peak_value - trough_value) / 2;
-    //   peak_value = threshold;
-    //   trough_value = threshold;
-    // }
-
     photo_resistor_data.update(sensorValue, currentMillis);
+
+    if (previous_count_peaks != photo_resistor_data.count_peaks) {
+      // new peak is found
+      
+      String event_data;
+      // Allocate a temporary JsonDocument
+      JsonDocument doc;
+      doc["timestamp"] = photo_resistor_data.peak_max;
+      doc["ipi"] = photo_resistor_data.peak_max - photo_resistor_data.peak_timestamps[(previous_count_peaks - 1) % length];
+
+      serializeJson(doc, event_data);
+
+      // send event
+      events.send(event_data, "peak", currentMillis);
+
+      // set count_peaks
+      previous_count_peaks = photo_resistor_data.count_peaks;
+    }
 
     // Serial.print(sensorValue);
     // Serial.print(", ");
