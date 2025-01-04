@@ -88,6 +88,8 @@ The flat side = collector; the arrow points to the emittor. See:
 - https://github.com/mruettgers/SMLReader
 - https://www.bitsandparts.nl/Lichtsensor-Fototransistor-BPW40-p115130
 
+Note however that the BPW40 is very sensitive to infrared light and only moderately sensitive to visible light. 
+The BPW40 did not capture the flashes of my energy meter.
 
 ## Project structure
 
