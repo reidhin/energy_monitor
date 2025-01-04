@@ -17,12 +17,35 @@ var chart_raw;
 window.addEventListener('load', onLoad);
 
 function onLoad(event) {
+
+    // initialize chart and events
     initChart();
     initEvents();
+
+    // initialize the data
     getData(function (xhttp) {
         updateRawGraph(xhttp);
         initEnergyGraphData(xhttp);
     } );
+    
+    // refresh the data if the tab is visible again
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState == "visible") {
+            console.log("refresh data");
+            
+            // remove the data
+            chart_raw.series[0].setData();
+            chart_raw.series[1].setData();
+            
+            // add new data
+            getData(function (xhttp) {
+                updateRawGraph(xhttp);
+                initEnergyGraphData(xhttp);
+            } );
+        }
+    });
+    
+    // regularly update the raw data
     setInterval(function () {
         getData(updateRawGraph)
     }, 5000 ) ; 
