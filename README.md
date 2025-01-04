@@ -20,6 +20,9 @@ When the environment is light, the LDR has a low resistance and the measured vol
 
 The used wiring is shown below.
 
+![schema](https://github.com/user-attachments/assets/8f83836d-f707-4fd5-adda-57f91d4ffed7)
+
+
 ## Instructions
 
 The codes tries to connect to the local Wifi network using the credentials listed in `arduino_secrets.h`. 
