@@ -17,12 +17,21 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 
+
 // ----------------------------------------------------------------------------
 // Definition of macros
 // ----------------------------------------------------------------------------
 
 // Port for webserver
 #define HTTP_PORT 80
+
+/* Configuration of NTP */
+	// this must always be done.
+	// set up TZ string to use a POSIX/gnu TZ string for local timezone
+	// TZ string information:
+	// https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
+#define MY_NTP_SERVER "pool.ntp.org"           
+#define MY_TZ "CET-1CEST,M3.5.0,M10.5.0/3"  
 
 // ----------------------------------------------------------------------------
 // Definition of global constants
@@ -31,6 +40,7 @@
 const int length = 200;
 
 const int delta_time = 25;
+
 
 // ----------------------------------------------------------------------------
 // Definition of the Led component
@@ -48,6 +58,7 @@ struct Led {
   }
 };
 
+
 // ----------------------------------------------------------------------------
 // Definition of the analog sensor
 // ----------------------------------------------------------------------------
@@ -62,6 +73,7 @@ struct AnalogSensor {
   }
 };
 
+
 // ----------------------------------------------------------------------------
 // Definition of the sensor data
 // ----------------------------------------------------------------------------
@@ -70,17 +82,17 @@ struct SensorData {
   // state variables - data
   int count_sample;
   int data_values[length];
-  long data_timestamps[length];
+  unsigned long data_timestamps[length];
 
   // state variables - peaks
   int count_peaks;
   int peak_values[length];
-  long peak_timestamps[length];
+  unsigned long peak_timestamps[length];
   int min_value;
   int max_value;
-  long peak_start;
-  long peak_end;
-  long peak_max;
+  unsigned long peak_start;
+  unsigned long peak_end;
+  unsigned long peak_max;
   
   // state variables - peak detection
   int threshold;
@@ -88,8 +100,10 @@ struct SensorData {
   bool peak;
   double avg;
 
+  long off_set;
+
   // initialization
-  void initialize(int init_threshold, int init_lag) {
+  void initialize(int init_threshold, int init_lag, long init_off_set) {
     // initialize variables
     count_sample = 0;
     count_peaks = 0;
@@ -97,6 +111,7 @@ struct SensorData {
     lag = init_lag;
     avg = 0.0;
     peak = false;
+    off_set = init_off_set;
 
     // initialize arrays
     for (int i = 0; i < length; ++i) {
@@ -109,7 +124,7 @@ struct SensorData {
   }
 
   // update the data
-  void update(int currentValue, long current_millis) {
+  void update(int currentValue, unsigned long current_millis) {
     // define indices for convenience
     int current_index = count_sample % length;
     int next_index = (count_sample + 1) % length;
@@ -177,6 +192,7 @@ struct SensorData {
       peaks.add(peak_timestamps[(i + count_peaks) % length]);
       peaks.add(peak_values[(i + count_peaks) % length]);
     };
+    doc["offset"] = off_set;
     return doc; 
   }
 };
@@ -196,14 +212,16 @@ AsyncEventSource events("/events");
 
 int sensorValue = 0;
 
-int currentMillis = 0;
-int nextMillis = 0;
+unsigned long currentMillis = 0;
+unsigned long nextMillis = 0;
 
 int previous_count_peaks = 0;
 
 SensorData photo_resistor_data;
 
-time_t now;
+long offSet;
+timeval tv;
+bool cbtime_set = false;
 
 
 // ----------------------------------------------------------------------------
@@ -282,6 +300,21 @@ void initWebServer() {
   Serial.println("HTTP Server Started");
 }
 
+// ----------------------------------------------------------------------------
+// Time functions
+// ----------------------------------------------------------------------------
+
+void time_is_set (void) {
+  gettimeofday (&tv, NULL);
+  cbtime_set = true;
+  Serial.println("------------------ settimeofday() was called ------------------");
+}
+
+// method to get milliseconds
+unsigned long getMillis() {
+  gettimeofday(&tv, NULL);
+  return 1000 * (tv.tv_sec - offSet) + tv.tv_usec / 1000;
+}
 
 
 // ----------------------------------------------------------------------------
@@ -301,10 +334,33 @@ void setup() {
   onboard_led.brightness = 0;
   onboard_led.on = false;
   onboard_led.update();
+  
+  // --> Here is the IMPORTANT ONE LINER needed in your sketch!
+  // This line is needed such that `time` refers to seconds since 1970
+  // instead of seconds since starting the program.
+  // The sync is done with the ntp-server.
+  configTime(MY_TZ, MY_NTP_SERVER); 
+  
+  settimeofday_cb (time_is_set);
+    Serial.println("Setting time: ");
+    while (!cbtime_set) {
+      Serial.print(".");
+      delay(500);
+    }
+  Serial.println("done!");
 
-  photo_resistor_data.initialize(20, 10);
+  offSet = tv.tv_sec;
+  Serial.print("Offset: ");
+  Serial.println(offSet);
+
+  photo_resistor_data.initialize(20, 10, offSet);
+
 }
 
+
+// ----------------------------------------------------------------------------
+// Loop
+// ----------------------------------------------------------------------------
 
 void loop() {
   // flash the onboard led
@@ -312,14 +368,14 @@ void loop() {
   onboard_led.update();
 
   // probeer elke 25 ms te meten (minstens)
-  currentMillis = millis();
+  // currentMillis = millis();
+  currentMillis = getMillis();
   if (currentMillis > nextMillis) {
     // define next time to sample
     nextMillis = currentMillis + delta_time;
 
     // read the analog in value
     sensorValue = photo_resistor.read();
-    time(&now);
 
     photo_resistor_data.update(sensorValue, currentMillis);
 
@@ -331,6 +387,7 @@ void loop() {
       JsonDocument doc;
       doc["timestamp"] = photo_resistor_data.peak_max;
       doc["ipi"] = photo_resistor_data.peak_max - photo_resistor_data.peak_timestamps[(previous_count_peaks - 1) % length];
+      doc["offset"] = offSet;
 
       serializeJson(doc, event_data);
 
@@ -340,16 +397,6 @@ void loop() {
       // set count_peaks
       previous_count_peaks = photo_resistor_data.count_peaks;
     }
-
-    // Serial.print(sensorValue);
-    // Serial.print(", ");
-    // Serial.print(photo_resistor_data.avg);
-    // Serial.print(", ");
-    // Serial.print(photo_resistor_data.min_value);
-    // Serial.print(", ");
-    // Serial.print(photo_resistor_data.max_value);
-    // Serial.print(", ");
-    // Serial.println(photo_resistor_data.peak ? 100 : 0);
 
   };
 

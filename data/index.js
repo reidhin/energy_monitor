@@ -10,6 +10,9 @@ var chart_power;
 var chart_ipi;
 var chart_raw;
 
+const raw_data_length = 1200;
+const ipi_data_length = 100;
+
 // ----------------------------------------------------------------------------
 // Initialization
 // ----------------------------------------------------------------------------
@@ -102,7 +105,10 @@ function initChart() {
       yAxis: {
         title: { text: 'Inter-Peak-Interval [ms]' }
       },
-      credits: { enabled: false }
+      credits: { enabled: false },
+      time: {
+        timezone: 'Europe/Berlin'
+      }
     });   
 
     // define power chart
@@ -125,7 +131,10 @@ function initChart() {
       yAxis: {
         title: { text: 'Vermogen [W]' }
       },
-      credits: { enabled: false }
+      credits: { enabled: false },
+      time: {
+        timezone: 'Europe/Berlin'
+      }
     });
 }
 
@@ -137,15 +146,16 @@ function initChart() {
 function initEnergyGraphData(xhttp) {
     // get the peaks data from xhttp request
     const peaks = xhttp.response["peaks"];
+    const offset = xhttp.response["offset"] * 1000;
     
     // define variables
     var ipi = [];
     var power = [];
     
     // fill variables by peak data
-    for (let i = Math.max(1, peaks.length-10); i < peaks.length; i++) {
-        ipi.push([ peaks[i][0], peaks[i][0] - peaks[i-1][0] ]);
-        power.push([ peaks[i][0], ipi2power( peaks[i][0] - peaks[i-1][0] ) ]);
+    for (let i = Math.max(1, peaks.length - ipi_data_length); i < peaks.length; i++) {
+        ipi.push([ offset + peaks[i][0], peaks[i][0] - peaks[i-1][0] ]);
+        power.push([ offset + peaks[i][0], ipi2power( peaks[i][0] - peaks[i-1][0] ) ]);
     };
     
     // update charts
@@ -161,17 +171,17 @@ function updateEnergyGraph(event) {
 
         // only add data if there is a difference
         // add to ipi chart
-        if(chart_ipi.series[0].data.length > 10) {
-            chart_ipi.series[0].addPoint([ data["timestamp"], data["ipi"] ], true, true, true);
+        if(chart_ipi.series[0].data.length > ipi_data_length) {
+            chart_ipi.series[0].addPoint([ 1000*data["offset"] + data["timestamp"], data["ipi"] ], true, true, true);
         } else {
-            chart_ipi.series[0].addPoint([ data["timestamp"], data["ipi"] ], true, false, true);
+            chart_ipi.series[0].addPoint([ 1000*data["offset"] + data["timestamp"], data["ipi"] ], true, false, true);
         }
 
         // add to power chart
-        if(chart_power.series[0].data.length > 10) {
-            chart_power.series[0].addPoint([ data["timestamp"], ipi2power( data["ipi"] ) ], true, true, true);
+        if(chart_power.series[0].data.length > ipi_data_length) {
+            chart_power.series[0].addPoint([ 1000*data["offset"] + data["timestamp"], ipi2power( data["ipi"] ) ], true, true, true);
         } else {
-            chart_power.series[0].addPoint([ data["timestamp"], ipi2power( data["ipi"] ) ], true, false, true);
+            chart_power.series[0].addPoint([ 1000*data["offset"] + data["timestamp"], ipi2power( data["ipi"] ) ], true, false, true);
         }
 
     }
@@ -179,24 +189,29 @@ function updateEnergyGraph(event) {
 
 
 function updateRawGraph(xhttp) {
+    // get offset
+    const offset = xhttp.response["offset"] * 1000;
+    
     // add raw signal data
     const data = xhttp.response["data"];
+    
     for (let i = 0; i < data.length; i++) {
-        if(chart_raw.series[0].data.length > 1200) {
-            chart_raw.series[0].addPoint(data[i], false, true, true);
+        if(chart_raw.series[0].data.length > raw_data_length) {
+            chart_raw.series[0].addPoint([ offset + data[i][0], data[i][1] ], false, true, true);
         } else {
-            chart_raw.series[0].addPoint(data[i], false, false, true);
+            chart_raw.series[0].addPoint([ offset + data[i][0], data[i][1] ], false, false, true);
         }
     };
       
     // add detected peaks to raw signal data
     const peaks = xhttp.response["peaks"];
+    
     // remove existing data
     chart_raw.series[1].setData([]);
     // only add peaks to visible raw signal
     for (let i = 0; i < peaks.length; i++) {
-        if(peaks[i][0] >= chart_raw.xAxis[0].getExtremes().dataMin) {
-            chart_raw.series[1].addPoint(peaks[i], false);
+        if((offset + peaks[i][0]) >= chart_raw.xAxis[0].getExtremes().dataMin) {
+            chart_raw.series[1].addPoint([ offset + peaks[i][0], peaks[i][1] ], false);
         }
     };
       
