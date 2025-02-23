@@ -14,6 +14,8 @@ Power = 3600 / (time between flashes [sec]) [Watts]
 - [GL5516 LDR](https://en.wikipedia.org/wiki/Photoresistor) Light-dependent resistor;
 - Resistor of 10k Ohm
 
+![PXL_20250223_135026082](https://github.com/user-attachments/assets/a1daf472-cdcd-4786-951f-00927fe35282)
+
 ## Wiring
 
 The light dependent resistor (LDR) is connected with a 10k Ohm resistor in series to divide the voltage. 
