@@ -2,6 +2,8 @@
 
 Calculating home energy usage by using the led indicator on the energy meter.
 
+![0123](https://github.com/user-attachments/assets/8567d732-d750-42e3-8d2b-b500185a4166)
+
 The led indicator presumably flashes every time 1 Wh of energy is used (https://en.wikipedia.org/wiki/Electricity_meter).
 By detecting the led flashes and measuring the time between two flashes the energy usage rate (or power) can be calculated as follows:
 Power = 3600 / (time between flashes [sec]) [Watts]
